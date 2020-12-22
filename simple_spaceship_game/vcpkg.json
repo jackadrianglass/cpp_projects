@@ -1,0 +1,18 @@
+{
+    "name": "2d-fractals",
+    "version-string": "0.1.0",
+    "dependencies": [
+        "glfw3",
+        {
+            "name": "imgui",
+            "default-features": false,
+            "features": ["glfw-binding", "opengl3-glad-binding"]
+        },
+        "spdlog",
+        "catch2",
+        "glm",
+        "ms-gsl",
+        "glad",
+        "stb"
+    ]
+}
