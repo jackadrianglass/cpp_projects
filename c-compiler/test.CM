@@ -1,0 +1,31 @@
+int banana;
+int boots;
+int foo(int a, int b) {
+    int c;
+    c = a + b;
+    if(a) /* error wrong expr type */
+        if(b) { /* error wrong expr type */
+            c = c + 1;
+            c = c + a + b;
+            a = foo(c, c);
+        }
+        else {
+            c = c + 2;
+            /* c; */
+        }
+    return c;
+}
+
+int main(void) {
+    int a;
+    int b;
+    int c;
+    a = 0;
+    b = a;
+    c = 4;
+    while(a != b) {
+        a = boo(c, b); /* error, no function found */
+        output(c);
+    }
+    return; /* error, wrong return type */
+}
