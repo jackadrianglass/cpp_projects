@@ -96,6 +96,14 @@ static void genDec(TreeNode *tree)
       break;
     }
     case FunK: {
+      //> Store the function start point
+      BucketList func = fun_lookup(tree->attr.name, tree->scope);
+      func->fun_start = emitSkip(0);
+      cGen(tree->child[0]); //< parameter list
+      cGen(tree->child[1]); //< function body
+
+      //> Restore function state and return to caller
+      // todo
       break;
     }
   }
