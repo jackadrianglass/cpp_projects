@@ -94,8 +94,7 @@ params: param_list {
 
 param_list: param_list COMMA param   {
     debug("in param list 1");
-    $$ = $1;
-    $$->sibling = $3;
+    $$ = getSiblingNode($1, $3);
 } | param {
     debug("in param list 2");
     $$ = $1;
@@ -297,6 +296,7 @@ arg_list: arg_list COMMA expression {
 }
 | expression {
     $$ = $1;
+    $$->isParameter = true;
 };
 
 

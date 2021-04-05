@@ -148,16 +148,7 @@ static void insertDecl(TreeNode *t) {
       done_nothing = true;
       break;
     }
-    case VarK: {
-      if(curr_scope == 0){
-        t->isGlobal = true;
-      } else {
-        done_nothing = false;
-      }
-      st_insert(t, t->lineno, location[curr_scope], curr_scope);
-      location[curr_scope]++;
-      break;
-    }
+    case VarK:
     case ArrayK: {
       if(curr_scope == 0){
         t->isGlobal = true;
@@ -165,11 +156,20 @@ static void insertDecl(TreeNode *t) {
         done_nothing = false;
       }
       st_insert(t, t->lineno, location[curr_scope], curr_scope);
-      location[curr_scope] += t->arraySize;
+      if(t->isParameter && t->sibling == NULL) {
+        location[curr_scope] = 0;
+      } else {
+        if(t->isArray){
+          location[curr_scope] += t->arraySize;
+        } else {
+          location[curr_scope]++;
+        }
+      }
       break;
     }
   }
 }
+
 /* Procedure checkNode performs
  * type checking at a single tree node
  */
@@ -259,8 +259,8 @@ static void typeCheckStmt(TreeNode* t){
             typeError(t, "Type mismatch to a parameter of ");
             return;
           }
-          decl_child = decl_child->child[0];
-          node_child = node_child->child[0];
+          decl_child = decl_child->sibling;
+          node_child = node_child->sibling;
         } while(decl_child != NULL || node_child != NULL);
       }
 

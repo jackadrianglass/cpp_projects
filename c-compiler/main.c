@@ -11,7 +11,7 @@
 #include "parse.h"
 #include "analyze.h"
 #include "symtab.h"
-//#include "cgen.h"
+#include "cgen.h"
 
 /* allocate global variables */
 int lineno = 0;
@@ -24,17 +24,18 @@ bool EchoSource = false;
 bool TraceScan = false;
 bool TraceParse = false;
 bool TraceAnalyze = true;
-bool TraceCode = false;
+bool TraceCode = true;
 
 bool Error = false;
 
 void parse_args(int argc, char** argv) {
   char pgm[120]; /* source code file name */
-  if (argc < 2 || argc > 3)
+  if (argc < 3 || argc > 4)
   {
-    fprintf(stderr, "usage: %s <in_filename> <o_filename>\n", argv[0]);
+    fprintf(stderr, "usage: %s <in_filename> <code_filename> <listing_filename (optional)>\n", argv[0]);
     exit(1);
   }
+
   strcpy(pgm, argv[1]);
   if (strchr(pgm, '.') == NULL) {
     strcat(pgm, ".CM");
@@ -46,7 +47,14 @@ void parse_args(int argc, char** argv) {
     exit(1);
   }
 
-  if(argc == 3){
+  strcpy(pgm, argv[2]);
+  code = fopen(pgm, "w");
+  if(code == NULL) {
+    fprintf(stderr, "Unable to create %s\n", pgm);
+    exit(1);
+  }
+
+  if(argc == 4){
     strcpy(pgm, argv[2]);
     listing = fopen(pgm, "w");
     if (listing == NULL)
@@ -80,4 +88,6 @@ int main(int argc, char** argv)
     fprintf(listing, "\nSymbol table:\n\n");
     printSymTab(listing);
   }
+
+  codeGen(syntaxTree, argv[2]);
 }

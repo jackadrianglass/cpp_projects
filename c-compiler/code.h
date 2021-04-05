@@ -10,31 +10,37 @@
 #define _CODE_H_
 
 /* pc = program counter  */
-#define  pc 7
+static int const pc = 7;
 
 /* mp = "memory pointer" points
  * to bottom of memory (for temp storage)
  */
-#define  mp 6
+static int const mp = 6;
 
 /* gp = "global pointer" points
  * to maximum address (global
  * variable storage)
  */
-#define gp 5
+static int const gp = 5;
 
 /*fp="frame pointer" points
  *points to current frame in the stack
  */
-#define fp 4
+static int const fp = 4;
+
+/*
+    sp = "stack pointer"
+    points to the top of the stack
+*/
+static int const sp = 3;
  
 /* accumulator */
-#define  bx 2
+static int const ac1 = 2;
 
 /* 2nd accumulator */
-#define  ax 1
+static int const ac2 = 1;
 
-#define  zero 0
+static int const zero = 0;
 
 /* code emitting utilities */
 
