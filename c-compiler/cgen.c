@@ -11,10 +11,7 @@
 #include "symtab.h"
 #include "code.h"
 #include "cgen.h"
-
-/* to store local var of main 
-*/
-static int main_locals = 0;
+#include "analyze.h"
 
 /* isRecursive:
  * 1 - cGen will recurse on sibling
@@ -28,12 +25,16 @@ static void cGen(TreeNode *tree);
 static int tmp;
 
 /* stack used for call */
-#define stack_size 10
-static int param_idx = 0; //< used for bottom up indexing
-TreeNode *param_stack[stack_size];
 int top = 0;
+static int param_idx = 0; //< used for bottom up indexing
+
+#define stack_size 10
+TreeNode *param_stack[stack_size][stack_size];
+static int which_stack = -1;
 
 static bool return_created = false;
+static bool ignore_param = false;
+static bool use_fp_for_param = true;
 
 /* stack routines*/
 int pushParam(TreeNode *param)
@@ -41,65 +42,44 @@ int pushParam(TreeNode *param)
   if (top == SIZE)
     return 1;
 
-  param_stack[top++] = param;
+  param_stack[which_stack][top++] = param;
   return 0;
-}
-
-TreeNode *popParam()
-{
-  if (top == 0)
-    return NULL;
-
-  TreeNode* return_val = param_stack[--top];
-  param_stack[top] = NULL;
-  return return_val;
 }
 
 void resetParamStack() {
   top = 0;
   param_idx = 0;
-  memset(param_stack, 0, stack_size * sizeof(TreeNode*));
+  memset(param_stack[which_stack], 0, stack_size * sizeof(TreeNode*));
 }
 
 /* emit one instruction to get the address of a var,
- * store the address in ac2,
- * we can access the var by ac2[0]
+ * store the address in ax1,
+ * we can access the var by ax1[0]
  */
-void emitGetAddr(TreeNode *node)
-{
-
-  if(node->scope == 0) {
-    if (node->isArray) {
-      emitRM("LDA", ac2, -(st_lookup(node->attr.name, 0)), gp, "get global array address");
+void emitGetAddr(TreeNode *node) {
+  if(node->isGlobal) {
+    emitRM("LDA", ax1, -1 - (st_lookup(node->attr.name, 0)), gp, "get global address");
+  } else if (var_lookup(node->attr.name, node->scope)->declNode->isParameter) {
+    if(use_fp_for_param) {
+      emitRM("LDA", ax1, 2 + (st_lookup(node->attr.name, node->scope)), fp, "get param variable address");
     } else {
-      emitRM("LDA", ac2, -1 - (st_lookup(node->attr.name, 0)), gp, "get global address");
+      emitRM("LDA", ax1, 2 + (st_lookup(node->attr.name, node->scope)), sp, "get param variable address");
     }
   } else {
-    if (node->isParameter) {
-      if (node->isArray) {
-        emitRM("LD", ac2, 2 + (st_lookup(node->attr.name, node->scope)), fp, "get param array address");
-      } else {
-        emitRM("LDA", ac2, 2 + (st_lookup(node->attr.name, node->scope)), fp, "get param variable address");
-      }
-    } else {
-      if (node->isArray) {
-        emitRM("LDA", ac2, -(st_lookup(node->attr.name, node->scope)), fp, "get local array address");
-      } else {
-        emitRM("LDA", ac2, -1 - (st_lookup(node->attr.name, node->scope)), fp, "get local address");
-      }
-    }
+    emitRM("LDA", ax1, -1 - (st_lookup(node->attr.name, node->scope)), fp, "get local address");
   }
 }
 
 static void genFuncEnd(TreeNode* node) {
   //> Restore function state and return to caller
+  emitComment("Prep to exit function");
   emitRO("ADD", sp, fp, zero, "copy fp value into sp"); //< removes all locals
 
-  emitRM("LD", fp, -1, fp, "load control link into fp");
-  emitRM("LDC", ac2, node->param_size, zero, "load param size");
-  emitRO("ADD", sp, sp, ac2, "move sp to above parameter list");
+  emitRM("LD", ax1, 0, fp, "load return address into ax1");
+  emitRM("LD", fp, 1, fp, "load control link into fp");
+  emitRM("LDA", sp, node->param_size + 2, sp, "move sp above function frame");
 
-  emitRM("LD", pc, sp, zero, "load return address into pc (jump)");
+  emitRO("ADD", pc, ax1, zero, "load return address into pc (jump)");
 }
 
 /* Procedure genDec generates code at an declaration node */
@@ -107,21 +87,20 @@ static void genDec(TreeNode *node)
 {
   switch(node->kind.dec) {
     case VarK: {
-      emitRM("LDC", ac1, 1, zero, "load 1 into ac1");
-      emitRO("SUB", sp, sp, ac1, "move sp down to allocate");
+      emitRM("LDA", sp, -1, sp, "move sp down to allocate sizeof(int)");
       break;
     }
     case ArrayK: {
-      emitRM("LDC", ac1, node->arraySize, zero, "load array size into ac1");
-      emitRO("SUB", sp, sp, ac1, "move sp down to allocate");
+      emitRM("LDA", sp, -node->arraySize, sp, "move sp down to allocate sizeof([])");
       break;
     }
     case FunK: {
+      char name[64];
       //> Store the function start point
       BucketList func = fun_lookup(node->attr.name, node->scope);
       func->fun_start = emitSkip(0);
-      emitComment("Begin Function");
-      emitComment(node->attr.name);
+      sprintf(name, ">>> Begin Function %s", node->attr.name);
+      emitComment(name);
 
       // No need to call parameter list as they're all allocated already
       cGen(node->child[1]); //< function body
@@ -130,7 +109,8 @@ static void genDec(TreeNode *node)
       } else {
         return_created = false;
       }
-      emitComment("End Function");
+      sprintf(name, ">>> Ending Function %s", node->attr.name);
+      emitComment(name);
       break;
     }
   }
@@ -148,15 +128,15 @@ static void genIfStmt(TreeNode* node) {
   //> emit skip to else block
   int current_location = emitSkip(0);
   emitBackup(saved_location1);
-  emitRM_Abs("JEQ", ac1, current_location, "if: false so jump to else");
+  emitRM_Abs("JEQ", ax2, current_location, "if(false) jump to else");
   emitRestore();
-
+  
   cGen(node->child[2]); //< else
 
   //> emit skip to end block
   current_location = emitSkip(0);
   emitBackup(saved_location2);
-  emitRM_Abs("JEQ", ac1, current_location, "if: true so jump to end");
+  emitRM_Abs("JEQ", zero, current_location, "if: end of true block so jump to end");
   emitRestore();
 }
 
@@ -173,15 +153,11 @@ static void genWhileStmt(TreeNode* node) {
   //> back patch jump to end
   int current_location = emitSkip(0);
   emitBackup(jump_location);
-  emitRM_Abs("JNE", ac1, current_location, "while: false so jump to end");
+  emitRM_Abs("JEQ", ax2, current_location, "while: false so jump to end");
   emitRestore();
 }
 
-static void genCallStmt(TreeNode* node) {
-  emitRM("LDC", ac1, node->param_size + 1, zero, "Load number of parameters");
-  emitRO("SUB", sp, sp, ac1, "Move stack pointer down");
-
-  BucketList func = fun_lookup(node->attr.name, node->scope);
+void genParam(TreeNode* node, BucketList func) {
   TreeNode* decl = func->declNode->child[0];
   while(decl != NULL) {
     pushParam(decl);
@@ -189,15 +165,56 @@ static void genCallStmt(TreeNode* node) {
   }
 
   cGen(node->child[0]);
-
   resetParamStack();
+}
 
-  emitRM("ST", fp, -1, sp, "store control point");
+void genParamStore(TreeNode* node) {
+  if(node->isParameter && !ignore_param){
+    TreeNode* decl = param_stack[which_stack][param_idx++];
+    if(decl == NULL) {
+      emitComment("Bug in parameter assignment");
+      return;
+    }
+    use_fp_for_param = false;
+    emitGetAddr(decl);
+    use_fp_for_param = true;
+    emitRM("ST", ax2, 0, ax1, "store value of expression into parameter location");
+  }
+}
+
+static void genCallStmt(TreeNode* node) {
+  which_stack++;
+  BucketList func = fun_lookup(node->attr.name, node->scope);
+  if(strcmp("output", node->attr.name) == 0) {
+    ignore_param = true;
+    genParam(node, func);
+    ignore_param = false;
+    emitRO("OUT", ax2, 0, 0, "output using ax2");
+    which_stack--;
+    return;
+  } else if(strcmp("input", node->attr.name) == 0) {
+    emitRO("IN", ax2, 0, 0, "input using ax2");
+    which_stack--;
+    return;
+  }
+
+  char name[64];
+  sprintf(name, "Start prep to jump to function %s", node->attr.name);
+  emitComment(name);
+
+  emitRO("LDA", sp, -(node->param_size + 2), sp, "Move stack pointer down");
+
+  genParam(node, func);
+
+  emitRM("ST", fp, 1, sp, "store control point");
   emitRO("ADD", fp, sp, zero, "set fp to sp");
-  emitRM("LDC", ac1, 2, zero, "load 2 into ac1");
-  emitRO("ADD", ac1, ac1, pc, "calculate return address");
-  emitRM("ST", ac1, 0, fp, "store return address");
-  emitRM("LDC", pc, func->fun_start, zero, "jump to function");
+  emitRM("LDA", ax2, 2, pc, "calculate return address");
+  emitRM("ST", ax2, 0, fp, "store return address");
+
+  memset(name, '\0', 64 * sizeof(char));
+  sprintf(name, "Jump to function %s", node->attr.name);
+  emitRM("JEQ", zero, func->fun_start, zero, name);
+  which_stack--;
 }
 
 /* Procedure genStmt generates code at a statement node */
@@ -214,10 +231,11 @@ static void genStmt(TreeNode *node)
     }
     case CallK: {
       genCallStmt(node);
+      genParamStore(node);
       break;
     }
     case ReturnK: {
-      cGen(node->child[0]); //< put return val in ac1
+      cGen(node->child[0]);
       genFuncEnd(node);
       return_created = true;
       break;
@@ -231,33 +249,33 @@ static void genStmt(TreeNode *node)
 } /* genStmt */
 
 static void genCmpJump(char* inst) {
-  emitRO("SUB", ac1, ac2, ac1, "sub for comparison");
-  emitRM(inst, ac1, 2, pc, "jump if true");
-  emitRM("LDC", ac1, 1, zero, "load false into register");
+  emitRO("SUB", ax2, ax1, ax2, "sub for comparison");
+  emitRM(inst, ax2, 2, pc, "jump if true");
+  emitRM("LDC", ax2, 0, zero, "load false into register");
   emitRM("LDA", pc, 1, pc, "unconditional jump");
-  emitRM("LDC", ac1, 0, zero, "load true into register");
+  emitRM("LDC", ax2, 1, zero, "load true into register");
 }
 
 static void genOpExpr(TreeNode* node) {
   cGen(node->child[0]);
-  emitRM("ST", ac1, tmp--, mp, "operator: push left");
+  emitRM("ST", ax2, tmp++, mp, "store left child of expr");
   cGen(node->child[1]);
-  emitRM("LD", ac2, ++tmp, mp, "operator: load right");
+  emitRM("LD", ax1, --tmp, mp, "load left child of expr");
   switch(node->attr.op) {
     case PLUS: {
-      emitRO("ADD", ac1, ac2, ac1, "operator +");
+      emitRO("ADD", ax2, ax1, ax2, "operator +");
       break;
     }
     case MINUS: {
-      emitRO("SUB", ac1, ac2, ac1, "operator -");
+      emitRO("SUB", ax2, ax1, ax2, "operator -");
       break;
     }
     case TIMES: {
-      emitRO("MUL", ac1, ac2, ac1, "operator *");
+      emitRO("MUL", ax2, ax1, ax2, "operator *");
       break;
     }
     case OVER: {
-      emitRO("DIV", ac1, ac2, ac1, "operator /");
+      emitRO("DIV", ax2, ax1, ax2, "operator /");
       break;
     }
     case EQ: {
@@ -296,42 +314,39 @@ static void genOpExpr(TreeNode* node) {
 /* Procedure genExp generates code at an expression node */
 static void genExp(TreeNode *node)
 {
+  static bool is_assignment = false;
   switch(node->kind.exp) {
     case OpK: {
       genOpExpr(node);
       break;
     }
     case ConstK: {
-      emitRM("LDC", ac1, node->attr.val, zero, "load constant");
+      emitRM("LDC", ax2, node->attr.val, zero, "load constant");
       break;
     }
     case IdK: {
       emitGetAddr(node);
-      emitRM("LD", ac1, 0, ac2, "load value at memory address");
+      if(!is_assignment){
+        emitRM("LD", ax2, 0, ax1, "load value at memory address");
+      }
       break;
     }
     case AssignK: {
+      is_assignment = true;
       cGen(node->child[0]);
-      //> store the address of the assignee which is located in ac2
-      emitRM("ST", ac2, tmp--, mp, "operator: push left");
+      is_assignment = false;
+      //> store the address of the assignee which is located in ax1
+      emitRM("ST", ax1, tmp++, mp, "store address of assignee");
 
       cGen(node->child[1]);
-      emitRM("LD", ac2, ++tmp, mp, "operator: load right"); //< restore addr
+      emitRM("LD", ax1, --tmp, mp, "pop stored address of assignee"); //< restore addr
 
-      emitRM("ST", ac1, 0, ac2, "assignment to store value");
+      emitRM("ST", ax2, 0, ax1, "operator =");
       break;
     }
   }
+  genParamStore(node);
 
-  if(node->isParameter){
-    TreeNode* decl = param_stack[param_idx++];
-    if(decl == NULL) {
-      emitComment("Bug in parameter assignment");
-      return;
-    }
-    emitGetAddr(decl);
-    emitRM("ST", ac1, 0, ac2, "store value of expression into parameter location");
-  }
 } /* genExp */
 
 /* Procedure cGen recursively generates code by
@@ -339,7 +354,7 @@ static void genExp(TreeNode *node)
  */
 static void cGen(TreeNode *tree)
 {
-  if(tree != NULL) { return; }
+  if(tree == NULL) { return; }
   switch (tree->nodekind)
   {
   case StmtK:
@@ -377,44 +392,14 @@ void codeGen(TreeNode *syntaxTree, char *codefile)
   emitComment(s);
   /* generate standard prelude */
   emitComment("Standard prelude:");
-  emitRM("LD", mp, 0, zero, "load maxaddress from location 0");
-  emitRM("LDA", fp, syntaxTree->kind.dec != FunK ? -(syntaxTree->param_size) : 0, mp, "copy gp to sp &allocating global variables(if any)");
+  emitRM("LD", gp, 0, zero, "load maxaddress from location 0");
+  int num_param = syntaxTree->kind.dec != FunK ? -(syntaxTree->param_size) : 0;
+  emitRM("LDA", fp, num_param - 2, gp, "copy gp to fp &allocating global variables(if any)");
+  emitRO("ADD", sp, 0, fp, "copy fp to sp");
   emitRM("ST", zero, 0, zero, "clear location 0");
   emitComment("End of standard prelude.");
 
-  /*jump to main */
-  if (TraceCode)
-    emitComment("Jump to main()");
-  int loc = emitSkip(6); /*A call consumes 5 instructions, and we need halt after main()*/
-
-  /*defining Input & output fuction as if they were in-built(global) */
-  /* if only necessary  i,e. if they are used in program */
-  fun = fun_lookup("input", 0);
-  if (fun != NULL)
-  {
-    if (TraceCode)
-      emitComment("Begin input()");
-    fun->fun_start = emitSkip(0);
-    emitRO("IN", ac2, 0, 0, "read input into ac2");
-    emitRM("LDA", fp, 1, fp, "pop prepare");
-    emitRM("LD", pc, -1, fp, "pop return addr");
-    if (TraceCode)
-      emitComment("End input()");
-  }
-
-  fun = fun_lookup("output", 0);
-  if (fun != NULL)
-  {
-    if (TraceCode)
-      emitComment("Begin output()");
-    fun->fun_start = emitSkip(0);
-    emitRM("LD", ac2, 1, fp, "load param into ac2");
-    emitRO("OUT", ac2, 0, 0, "output using ac2");
-    emitRM("LDA", fp, 1, fp, "pop prepare");
-    emitRM("LD", pc, -1, fp, "pop return addr");
-    if (TraceCode)
-      emitComment("End output()");
-  }
+  int loc = emitSkip(8);
 
   /* generate code for TINY program */
   cGen(syntaxTree);
@@ -423,17 +408,9 @@ void codeGen(TreeNode *syntaxTree, char *codefile)
   /* Fill up jump-to-main code */
   emitBackup(loc);
   fun = fun_lookup("main", 0);
-  if (fun == NULL)
-  {
-    fprintf(stderr, "main not found\n");
-  }
 
-  emitRM("LDA", ac2, 3, pc, "store returned PC");
-  emitRM("LDA", fp, -1, fp, "push prepare");
-  emitRM("ST", ac2, 0, fp, "push returned PC");
-  emitRM("LDC", pc, fun->fun_start, 0, "jump to function");
-  emitRM("LDA", fp, main_locals, fp, "release local var");
-
-  emitComment("End of execution.");
-  emitRO("HALT", 0, 0, 0, "");
+  emitRM("LDA", ax1, 2, pc, "prep to save return address");
+  emitRM("ST", ax1, 0, fp, "save return address");
+  emitRM("JEQ", zero, fun->fun_start, zero, "jump to main()");
+  emitRO("HALT", 0, 0, 0, "End of execution.");
 }

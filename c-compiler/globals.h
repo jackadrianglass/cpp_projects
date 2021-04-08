@@ -81,7 +81,7 @@ typedef struct treeNode
    {
       TokenType op;
       int val;
-      char *name;
+      char * name;
    } attr;
 
    // items for semantic analysis

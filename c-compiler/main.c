@@ -22,7 +22,7 @@ FILE *code;
 /* allocate and set tracing flags */
 bool EchoSource = false;
 bool TraceScan = false;
-bool TraceParse = false;
+bool TraceParse = true;
 bool TraceAnalyze = true;
 bool TraceCode = true;
 

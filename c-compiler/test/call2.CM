@@ -1,0 +1,9 @@
+int meaning(void) {
+    return 42;
+}
+
+int main(void) {
+    int a;
+    a = input();
+    output(a + meaning());
+}

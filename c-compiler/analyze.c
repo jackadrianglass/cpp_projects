@@ -9,7 +9,6 @@
 
 static int curr_scope = 0;
 static int scope_count = 0;
-static bool done_nothing = true;
 
 
 /* counter for variable memory locations */
@@ -28,6 +27,66 @@ static void checkNode(TreeNode *t);
 static void typeCheckStmt(TreeNode* t);
 static void typeCheckExpr(TreeNode* t);
 static void typeCheckDecl(TreeNode* t);
+
+static char * const output_param_name = "out";
+
+TreeNode integer_node = {
+  .child = {NULL, NULL, NULL},
+  .sibling = NULL,
+  .lineno = 0,
+  .nodekind = DecK,
+  .kind = {FunK},
+  .attr.name = output_param_name,
+  .value = 0,
+  .isArray = false,
+  .arraySize = 0,
+  .isParameter = true,
+  .isGlobal = false,
+  .param_size = 0,
+  .local_size = 1,
+  .scope = MAX_SCOPE - 1,
+  .type = Integer,
+};
+
+static char * const output_name = "output\0";
+
+TreeNode output = {
+  .child = {&integer_node, NULL, NULL},
+  .sibling = NULL,
+  .lineno = 0,
+  .nodekind = DecK,
+  .kind = {FunK},
+  .attr.name = output_name,
+  .value = 0,
+  .isArray = false,
+  .arraySize = 0,
+  .isParameter = false,
+  .isGlobal = true,
+  .param_size = 1,
+  .local_size = 0,
+  .scope = MAX_SCOPE + 1,
+  .type = Void
+};
+
+static char * const input_name = "input\0";
+
+TreeNode input = {
+  .child = {&integer_node, NULL, NULL},
+  .sibling = NULL,
+  .lineno = 0,
+  .nodekind = DecK,
+  .kind = {FunK},
+  .attr.name = input_name,
+  .value = 0,
+  .isArray = false,
+  .arraySize = 0,
+  .isParameter = false,
+  .isGlobal = true,
+  .param_size = 1,
+  .local_size = 0,
+  .scope = 11,
+  .type = Integer
+};
 
 /* Procedure traverse is a generic recursive 
  * syntax tree traversal routine:
@@ -65,9 +124,6 @@ static void nullProcPost(TreeNode *t){
   // reset to global scope
   if(t->nodekind == DecK && t->kind.dec == FunK){
     curr_scope = 0;
-    if(done_nothing){
-      scope_count--;
-    }
   }
 }
 
@@ -129,6 +185,7 @@ static void symbolCheckExpr(TreeNode* t) {
         genericError(t, "Use of undeclared var");
         return;
       }
+      t->scope = curr_scope;
       break;
     }
   }
@@ -145,17 +202,15 @@ static void insertDecl(TreeNode *t) {
         return;
       }
       st_insert(t, t->lineno, -1, curr_scope);
-      done_nothing = true;
       break;
     }
     case VarK:
     case ArrayK: {
       if(curr_scope == 0){
         t->isGlobal = true;
-      } else {
-        done_nothing = false;
       }
       st_insert(t, t->lineno, location[curr_scope], curr_scope);
+      t->scope = curr_scope;
       if(t->isParameter && t->sibling == NULL) {
         location[curr_scope] = 0;
       } else {
@@ -190,9 +245,6 @@ static void checkNode(TreeNode *t)
       // reset to global scope
       if(t->kind.dec == FunK){
         curr_scope = 0;
-        if(done_nothing){
-          scope_count--;
-        }
       }
       break;
     }
@@ -202,11 +254,16 @@ static void checkNode(TreeNode *t)
   }
 }
 
-static bool isOutput(TreeNode* t) {
+bool isOutput(TreeNode* t) {
   return strcmp(t->attr.name, "output") == 0
       && t->param_size == 1
-      && t->child[0] != NULL
-      && t->child[0]->type == Integer;
+      && t->child[0] != NULL;
+}
+
+bool isInput(TreeNode* t) {
+  return strcmp(t->attr.name, "input") == 0
+      && t->param_size == 0
+      && t->child[0] == NULL;
 }
 
 bool is_main(TreeNode* t) {
@@ -237,10 +294,14 @@ static void typeCheckStmt(TreeNode* t){
     case CallK: {
       BucketList call = fun_lookup(t->attr.name, curr_scope);
       if(call == NULL) {
-        if(!isOutput(t)) {
-          genericError(t, "Call to unknown function");
-        } else {
+        if(isOutput(t)) {
           t->type = Void;
+          st_insert(&output, 0, -1, 0);
+        } else if(isInput(t)) {
+          t->type = Integer;
+          st_insert(&input, 0, -1, 0);
+        } else {
+          genericError(t, "Call to unknown function");
         }
         return;
       }
@@ -327,6 +388,7 @@ static void typeCheckExpr(TreeNode* t){
         return;
       }
 
+      t->scope = curr_scope;
       t->type = var->declNode->type;
       add_reference_to(var, t->lineno);
       break;

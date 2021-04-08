@@ -1,0 +1,32 @@
+int main(void) {
+    int a;
+    a = input();
+    if(a <= 0) {
+        output(1);
+    }
+
+    if(a < 0) {
+        output(2);
+    }
+
+    if(a >= 0) {
+        output(3);
+    }
+    
+    if(a > 0) {
+        output(4);
+    }
+
+    if(a == 0) {
+        output(5);
+    } else {
+        output(6);
+    }
+
+    if(a != 0) {
+        output(7);
+    } else {
+        output(8);
+    }
+}
+

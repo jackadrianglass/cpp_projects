@@ -1,4 +1,5 @@
 project('C- Compiler', 'c')
+add_global_arguments('-std=c17', language : 'c')
 # bison part
 bison = find_program('bison', required: true)
 bisonargs = [

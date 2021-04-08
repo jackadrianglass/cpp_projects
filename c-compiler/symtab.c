@@ -24,7 +24,7 @@ void reset_sym_table() {
    in hash function  */
 #define SHIFT 4
 
-static int hash(char const* const key)
+static int hash(char * const key)
 {
   int temp = 0;
   int i = 0;
@@ -43,7 +43,7 @@ static int hash(char const* const key)
  */
 void st_insert(TreeNode* declNode, int lineno, int loc, int scope)
 {
-  char const* const name = declNode->attr.name;
+  char * const name = declNode->attr.name;
   int h = hash(name);
   int insert_scope = scope;
   if(loc == -1){

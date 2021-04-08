@@ -35,10 +35,10 @@ static int const fp = 4;
 static int const sp = 3;
  
 /* accumulator */
-static int const ac1 = 2;
+static int const ax2 = 2;
 
 /* 2nd accumulator */
-static int const ac2 = 1;
+static int const ax1 = 1;
 
 static int const zero = 0;
 

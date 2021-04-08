@@ -17,4 +17,6 @@ void buildSymtab(TreeNode *);
  */
 void typeCheck(TreeNode *);
 
+extern TreeNode output;
+extern TreeNode input;
 #endif

@@ -1,0 +1,10 @@
+void recurse(int a) {
+    output(a);
+    if(a > 0) {
+        recurse(a - 1);
+    }
+}
+
+int main(void) {
+    recurse(input());
+}

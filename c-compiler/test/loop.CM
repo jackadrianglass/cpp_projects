@@ -1,0 +1,8 @@
+int main(void) {
+    int a;
+    a = input();
+    while(a != 0) {
+        output(a);
+        a = input();
+    }
+}
